@@ -1,0 +1,17 @@
+{
+  "name": "node-mongo-redis-backend",
+  "version": "1.0.0",
+  "description": "Express + MongoDB + Redis backend, also serves the built React frontend",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "mongodb": "^6.8.0",
+    "redis": "^4.7.0"
+  },
+  "packageManager": "pnpm@9.7.0"
+}
