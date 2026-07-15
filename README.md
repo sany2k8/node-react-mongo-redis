@@ -1,5 +1,11 @@
 # Node + React + MongoDB + Redis
 
+[![Node.js](https://img.shields.io/badge/Node.js-22-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
+[![React](https://img.shields.io/badge/React-18-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev/)
+[![MongoDB](https://img.shields.io/badge/MongoDB-7.0-47A248?style=for-the-badge&logo=mongodb&logoColor=white)](https://www.mongodb.com/)
+[![Redis](https://img.shields.io/badge/Redis-7-DC382D?style=for-the-badge&logo=redis&logoColor=white)](https://redis.io/)
+[![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/)
+
 A full-stack demo application showcasing **Docker networking** with an Express backend, a React (Vite) frontend, MongoDB for persistence, and Redis for caching.
 
 The single multi-stage `Dockerfile` builds the React frontend, copies the production assets into the backend image, and serves everything from a single Express server on port **3000**.
@@ -8,7 +14,7 @@ The single multi-stage `Dockerfile` builds the React frontend, copies the produc
 
 ## Table of Contents
 
-- [Architecture](#architecture)
+- [Architecture Diagram](#architecture-diagram)
 - [Prerequisites](#prerequisites)
 - [Quick Start with Docker Compose](#quick-start-with-docker-compose)
 - [Local Development (No Docker)](#local-development-no-docker)
@@ -19,20 +25,35 @@ The single multi-stage `Dockerfile` builds the React frontend, copies the produc
 
 ---
 
-## Architecture
+## Architecture Diagram
 
-```
-┌────────────────────────────────────────────┐
-│              Docker Compose                │
-│                                            │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐ │
-│  │   app    │  │  mongo   │  │  redis   │ │
-│  │ :3000    │──│ :27017   │  │ :6379    │ │
-│  │ Express  │  │ MongoDB 7│  │ Redis 7  │ │
-│  │ + React  │──│          │  │          │ │
-│  └──────────┘  └──────────┘  └──────────┘ │
-│         bridge network (app-network)       │
-└────────────────────────────────────────────┘
+The system operates differently depending on the network configuration:
+
+```mermaid
+flowchart TD
+    subgraph Host ["Host Machine"]
+        Client["API Client (Browser/curl)"]
+    end
+
+    subgraph Docker ["Docker Virtualization Network Space"]
+        subgraph AppContainer ["App Container (Express + React)"]
+            Express["Express Web Server"]
+            React["React SPA (Static Files)"]
+        end
+
+        subgraph MongoContainer ["MongoDB Container (mongo)"]
+            MongoDB[("MongoDB (labdb)")]
+        end
+
+        subgraph RedisContainer ["Redis Container (redis)"]
+            Redis[("Redis Cache")]
+        end
+    end
+
+    Client -->|Port 3000| Express
+    Express -->|Serves Static| React
+    Express -->|Port 27017| MongoDB
+    Express -->|Port 6379| Redis
 ```
 
 - **app** — Node.js / Express backend that also serves the built React SPA.
