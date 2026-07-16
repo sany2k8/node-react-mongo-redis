@@ -1,0 +1,37 @@
+# Step 10c — A Job that fails on purpose
+#
+# Apply this and WATCH the retry/backoff machinery. Understanding what a failed
+# Job looks like is more useful than understanding what a successful one looks
+# like — you'll only ever debug the failures.
+#
+# Expect: 3 pods total (1 try + 2 retries), each Error, then Job -> Failed.
+# Retries back off exponentially: ~10s, ~20s.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: failing-demo
+  namespace: node-react-mongo-redis
+  labels:
+    app: node-react-mongo-redis
+    component: batch
+spec:
+  backoffLimit: 2 # 1 initial attempt + 2 retries = 3 pods
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: boom
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "attempt starting on $(hostname)"
+              echo "simulating a failed migration..."
+              sleep 2
+              echo "ERROR: migration failed" >&2
+              exit 1
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { cpu: 50m, memory: 32Mi }

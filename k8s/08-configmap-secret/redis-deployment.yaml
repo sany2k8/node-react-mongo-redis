@@ -1,0 +1,60 @@
+# Step 8 — Redis, now password-protected
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: node-react-mongo-redis
+  labels:
+    app: node-react-mongo-redis
+    component: redis
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: node-react-mongo-redis
+      component: redis
+  template:
+    metadata:
+      labels:
+        app: node-react-mongo-redis
+        component: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          imagePullPolicy: IfNotPresent
+          # $(VAR) is expanded by KUBELET from this container's own env — it is
+          # NOT shell syntax. There is no shell here: `command`/`args` exec the
+          # binary directly. Kubernetes substitutes $(REDIS_PASSWORD) before exec.
+          #
+          # Using $VAR or ${VAR} would NOT work — it'd be passed literally.
+          command: ["redis-server"]
+          args:
+            - "--requirepass"
+            - "$(REDIS_PASSWORD)"
+            - "--appendonly"
+            - "yes"
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: app-secret
+                  key: REDIS_PASSWORD
+          ports:
+            - name: redis
+              containerPort: 6379
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+      volumes:
+        - name: data
+          emptyDir: {}

@@ -1,0 +1,47 @@
+# Step 2 — Pod
+#
+# The smallest thing Kubernetes will schedule. Not a container — a Pod. A Pod is
+# one or more containers that share a network namespace (same IP, same
+# localhost) and can share volumes.
+#
+# This Pod is DELIBERATELY BROKEN in an interesting way: it is told to reach
+# mongo and redis, but no such Services exist yet. The app is written to survive
+# that, so it starts fine and reports the failure at /api/network-info.
+# You will fix it for real in step 6 (Service).
+apiVersion: v1
+kind: Pod
+metadata:
+  name: app-pod
+  namespace: node-react-mongo-redis
+  labels:
+    app: node-react-mongo-redis
+    component: app
+spec:
+  containers:
+    - name: app
+      image: sany2k8/node-react-mongo-redis-app:v1
+      # IfNotPresent = use the node's cached copy if it has one. With a moving
+      # tag like :latest you'd want Always; with immutable tags like :v1 this is
+      # both faster and safer. See step 12 for why :latest ruins rollbacks.
+      imagePullPolicy: IfNotPresent
+      ports:
+        # Purely documentation — it does NOT open or firewall anything. The
+        # container listens on 3000 because the app binds 3000. Naming the port
+        # matters though: Services (step 6) can target "http" by name.
+        - name: http
+          containerPort: 3000
+      env:
+        - name: MONGO_HOST
+          value: "mongo" # no Service named "mongo" exists yet -> unreachable
+        - name: REDIS_HOST
+          value: "redis" # same
+      resources:
+        # The LimitRange from step 1 would fill these in, but being explicit is
+        # the habit worth building. requests = what the scheduler reserves,
+        # limits = what the kernel enforces.
+        requests:
+          cpu: 50m
+          memory: 96Mi
+        limits:
+          cpu: 300m
+          memory: 256Mi

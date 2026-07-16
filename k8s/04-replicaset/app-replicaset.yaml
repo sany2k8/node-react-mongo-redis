@@ -1,0 +1,60 @@
+# Step 4 — ReplicaSet
+#
+# A ReplicaSet has exactly one job: make the number of Pods matching its
+# selector equal `replicas`. Too few -> create. Too many -> delete. Forever.
+#
+# That is the reconciliation loop, and it is the heart of Kubernetes: you
+# declare desired state, a controller continuously works to make reality match.
+#
+# You will rarely write one of these by hand — Deployments (step 5) create them
+# for you. Write it once, here, so you know what a Deployment is actually doing.
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: app-rs
+  namespace: node-react-mongo-redis
+  labels:
+    app: node-react-mongo-redis
+    component: app
+spec:
+  replicas: 3
+
+  # THE SELECTOR. This is how the RS finds "its" Pods. It is IMMUTABLE.
+  # Crucially, ownership is decided by this query alone — the RS does not track
+  # Pods by name or UID. Any pre-existing Pod matching this selector gets
+  # adopted, and the RS will delete it to get back down to `replicas`.
+  selector:
+    matchLabels:
+      app: node-react-mongo-redis
+      component: app
+      rs-demo: "true"
+
+  template:
+    metadata:
+      # These labels MUST satisfy the selector above, or the API server rejects
+      # the object ("selector does not match template labels"). Otherwise the RS
+      # would create Pods it couldn't see and loop forever.
+      labels:
+        app: node-react-mongo-redis
+        component: app
+        rs-demo: "true"
+    spec:
+      containers:
+        - name: app
+          image: sany2k8/node-react-mongo-redis-app:v1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: MONGO_HOST
+              value: "mongo"
+            - name: REDIS_HOST
+              value: "redis"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi

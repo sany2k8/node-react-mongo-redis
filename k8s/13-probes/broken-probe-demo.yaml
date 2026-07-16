@@ -1,0 +1,98 @@
+# Step 13b — The two classic probe disasters, side by side.
+#
+# Apply this and watch. Both pods are running PERFECTLY HEALTHY apps.
+# Both are broken by their probe configuration alone.
+#
+#   kubectl apply -f 13-probes/broken-probe-demo.yaml
+#   kubectl get pods -n node-react-mongo-redis -l demo=broken-probe -w
+---
+# DISASTER 1: liveness probe pointed at the wrong port.
+#
+# The app is fine. The probe is wrong. Result: CrashLoopBackOff forever.
+# The kubelet kills the container ~30s in, restarts it, kills it again...
+#
+# This is what "my app works locally but CrashLoopBackOffs in k8s" usually is.
+# Watch RESTARTS climb and the backoff grow: 10s, 20s, 40s, 80s ... capped 5m.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: broken-liveness-wrong-port
+  namespace: node-react-mongo-redis
+  labels:
+    demo: broken-probe
+spec:
+  containers:
+    - name: app
+      image: sany2k8/node-react-mongo-redis-app:v2
+      imagePullPolicy: IfNotPresent
+      ports:
+        - name: http
+          containerPort: 3000
+      livenessProbe:
+        httpGet:
+          path: /api/health
+          port: 9999 # <-- NOTHING LISTENS HERE. The app is on 3000.
+        periodSeconds: 5
+        failureThreshold: 3
+      resources:
+        requests: { cpu: 50m, memory: 96Mi }
+        limits: { cpu: 200m, memory: 256Mi }
+---
+# DISASTER 2: liveness probe that checks a DEPENDENCY.
+#
+# /api/items performs a REAL Mongo query and returns 503 when Mongo is down.
+# Pointing liveness at it is the shape of "let's health-check the database" —
+# a probe people write all the time because it looks more thorough.
+#
+# (Note we do NOT probe /api/network-info: that endpoint reports whether the app
+# has EVER connected, because the backend caches the collection handle. It keeps
+# saying mongo_reachable:true against a dead Mongo — which is its own lesson in
+# how easy it is to write a health endpoint that lies.)
+#
+# It looks responsible. It is a loaded gun:
+#   - mongo hiccups for 40s
+#   - EVERY app pod fails liveness simultaneously
+#   - EVERY app pod restarts at once
+#   - a 40s database blip becomes a full app outage
+#   - the restart storm makes recovery SLOWER, and the cold pods hammer mongo
+#     with reconnects the moment it returns
+#
+# A restart cannot fix someone else's database. Never check dependencies in
+# liveness. Readiness, maybe. Liveness, never.
+#
+# To watch it: scale mongo to 0 and see this pod start restarting while the
+# properly-probed deployment just goes NotReady and waits.
+#   kubectl scale deploy/mongo -n node-react-mongo-redis --replicas=0
+apiVersion: v1
+kind: Pod
+metadata:
+  name: broken-liveness-checks-deps
+  namespace: node-react-mongo-redis
+  labels:
+    demo: broken-probe
+spec:
+  containers:
+    - name: app
+      image: sany2k8/node-react-mongo-redis-app:v2
+      imagePullPolicy: IfNotPresent
+      ports:
+        - name: http
+          containerPort: 3000
+      envFrom:
+        - configMapRef:
+            name: app-config
+        - secretRef:
+            name: app-secret
+      livenessProbe:
+        httpGet:
+          # THE ANTI-PATTERN: this endpoint queries Mongo. httpGet counts
+          # 200-399 as success, so the 503 it returns when Mongo is down fails
+          # liveness -> kubelet restarts a perfectly healthy container.
+          path: /api/items
+          port: http
+        initialDelaySeconds: 15
+        periodSeconds: 10
+        failureThreshold: 2
+      resources:
+        requests: { cpu: 50m, memory: 96Mi }
+        limits: { cpu: 200m, memory: 256Mi }

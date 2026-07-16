@@ -1,0 +1,19 @@
+# Step 6 — Redis Service (ClusterIP)
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: node-react-mongo-redis
+  labels:
+    app: node-react-mongo-redis
+    component: redis
+spec:
+  type: ClusterIP
+  selector:
+    app: node-react-mongo-redis
+    component: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+      protocol: TCP

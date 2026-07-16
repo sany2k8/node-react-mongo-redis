@@ -1,0 +1,31 @@
+# DEV: small, fast, disposable.
+app:
+  replicaCount: 1
+  image:
+    tag: v1              # dev tracks v1
+  service:
+    type: ClusterIP
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits:   { cpu: 200m, memory: 192Mi }
+  config:
+    NODE_ENV: development
+    PORT: "3000"
+  # no graceful-shutdown wait in dev — restart fast
+  preStopSleepSeconds: 0
+  minReadySeconds: 0
+
+autoscaling:
+  enabled: false         # no HPA in dev
+
+mongodb:
+  persistence:
+    enabled: false       # ephemeral — wipe on every restart, deliberately
+redis:
+  persistence:
+    enabled: false
+
+auth:
+  mongoUser: devuser
+  mongoPassword: "dev-p@ss"
+  redisPassword: "dev-redis"

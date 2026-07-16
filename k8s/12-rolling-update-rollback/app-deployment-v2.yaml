@@ -1,0 +1,91 @@
+# Step 12 — The v2 rollout
+#
+# Identical to 08-configmap-secret/app-deployment.yaml except:
+#   image:  ...:v1  ->  ...:v2
+#   labels: version: v1  ->  version: v2
+#
+# Both images were built from the same source with a different APP_VERSION build
+# arg, so GET /api/ reports which one is serving you. That makes the rollout
+# observable in real time rather than something you take on faith.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+  namespace: node-react-mongo-redis
+  labels:
+    app: node-react-mongo-redis
+    component: app
+  annotations:
+    # Shows up in `kubectl rollout history`. WITHOUT this, every revision is
+    # annotated "<none>" and history is useless for figuring out what changed.
+    kubernetes.io/change-cause: "Upgrade app to v2"
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+
+  # A new pod must be Ready for 10 CONTINUOUS seconds before the rollout counts
+  # it as available and moves on. This is your cheapest protection against a
+  # container that starts, passes one probe, then crashes: the rollout stalls
+  # instead of marching on and taking down every replica.
+  minReadySeconds: 10
+
+  # If the rollout makes no progress for 120s, mark the Deployment
+  # Progressing=False with reason ProgressDeadlineExceeded. NOTE: this does NOT
+  # auto-rollback — it only reports. Kubernetes has no auto-rollback; that's
+  # what your CI/CD or Argo Rollouts/Flagger is for.
+  progressDeadlineSeconds: 120
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0 # never drop below 3 ready pods...
+      maxSurge: 1 # ...add 1 extra at a time (4 pods peak)
+
+  selector:
+    matchLabels:
+      app: node-react-mongo-redis
+      component: app
+
+  template:
+    metadata:
+      labels:
+        app: node-react-mongo-redis
+        component: app
+        version: v2 # not in the selector, so it's free to change
+    spec:
+      containers:
+        - name: app
+          image: sany2k8/node-react-mongo-redis-app:v2 # <-- the actual change
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: app-config
+            - secretRef:
+                name: app-secret
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+
+          # A readiness probe is what makes maxUnavailable:0 mean anything.
+          # Without it "Ready" means "the process started" (proved in step 5),
+          # and a zero-downtime rollout is a fiction. Full treatment in step 13.
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 3
+            failureThreshold: 2
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 96Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi

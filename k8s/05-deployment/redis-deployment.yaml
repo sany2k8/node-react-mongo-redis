@@ -1,0 +1,44 @@
+# Step 5 — Redis Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: node-react-mongo-redis
+  labels:
+    app: node-react-mongo-redis
+    component: redis
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # same single-writer reasoning as mongo
+  selector:
+    matchLabels:
+      app: node-react-mongo-redis
+      component: redis
+  template:
+    metadata:
+      labels:
+        app: node-react-mongo-redis
+        component: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: redis
+              containerPort: 6379
+          # No --requirepass yet; step 8 adds it from a Secret.
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+      volumes:
+        - name: data
+          emptyDir: {}

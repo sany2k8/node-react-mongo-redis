@@ -1,0 +1,20 @@
+# Step 9 — Redis PersistentVolumeClaim
+#
+# Redis is a cache here, so losing it is survivable — but the deployment runs
+# with --appendonly yes (step 8), so it writes an AOF to /data. Giving it a PVC
+# means the hit_counter survives a Pod restart.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-data
+  namespace: node-react-mongo-redis
+  labels:
+    app: node-react-mongo-redis
+    component: redis
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 512Mi
+  storageClassName: standard

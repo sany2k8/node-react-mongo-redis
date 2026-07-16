@@ -1,0 +1,106 @@
+{{- if .Values.seedJob.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "nrmr.fullname" . }}-seed
+  labels:
+    {{- include "nrmr.componentLabels" (dict "ctx" . "component" "seed") | nindent 4 }}
+  annotations:
+    {{/*
+      ★ HELM HOOKS ★
+
+      This Job is NOT part of the normal release. Helm runs it separately, at the
+      declared lifecycle point, and WAITS for it to succeed before continuing.
+      If it fails, the release fails — the app is never rolled out against an
+      unseeded/unmigrated database.
+
+      hook-weight: "-5"     lower runs FIRST (a STRING, sorted numerically)
+      hook-delete-policy:
+        before-hook-creation  delete the previous hook Job first. REQUIRED —
+                              Jobs are immutable (step 10), so the 2nd upgrade
+                              fails with "field is immutable" without it.
+        hook-succeeded        clean up on success; KEEP failures so you can read
+                              the logs.
+
+      ⚠️ WHY post-install AND NOT pre-install ⚠️
+
+      The obvious choice is `pre-install,pre-upgrade`. It does not work here, and
+      the failure is instructive:
+
+        Error: INSTALLATION FAILED: failed pre-install: resource
+        Job/nrmr-prod-seed not ready. status: Failed
+
+      pre-install hooks run before EVERY resource in the release — including the
+      Secret this Job reads its credentials from, and the MongoDB it seeds.
+      Neither exists yet, so the pod can't even start (CreateContainerConfigError:
+      secret "nrmr-prod-auth" not found).
+
+      A `pre-install` hook can only depend on things OUTSIDE the release — an
+      external/managed database, an existingSecret. Because this chart BUNDLES
+      its database, the seed must run post-install.
+
+      The trade-off is real: with `post-upgrade` the new app is already serving
+      before the seed/migration runs. For a genuine schema migration you want
+      `pre-upgrade` (so it lands before the new code) — which forces the
+      expand/contract discipline from step 12, and requires the DB to live
+      outside the chart.
+    */}}
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.seedJob.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.seedJob.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "nrmr.componentLabels" (dict "ctx" . "component" "seed") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: seed
+          image: "{{ .Values.mongodb.image.repository }}:{{ .Values.mongodb.image.tag }}"
+          imagePullPolicy: {{ .Values.mongodb.image.pullPolicy }}
+          env:
+            - name: MONGO_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "nrmr.secretName" . }}
+                  key: MONGO_USER
+            - name: MONGO_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "nrmr.secretName" . }}
+                  key: MONGO_PASSWORD
+            - name: MONGO_HOST
+              value: {{ include "nrmr.mongoServiceName" . | quote }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              echo "==> waiting for mongo at ${MONGO_HOST}"
+              # pre-install runs before mongo exists, so this MUST poll.
+              # activeDeadlineSeconds bounds the wait.
+              until mongosh "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@${MONGO_HOST}:27017/admin" \
+                      --quiet --eval 'db.runCommand({ping:1})' > /dev/null 2>&1; do
+                echo "    not ready, retry in 3s..."
+                sleep 3
+              done
+              echo "==> seeding (idempotent upsert)"
+              mongosh "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@${MONGO_HOST}:27017/labdb?authSource=admin" --quiet --eval '
+                db.items.createIndex({ name: 1 }, { unique: true });
+                const seeds = ["seeded: helm", "seeded: kubernetes", "seeded: mongodb", "seeded: redis"];
+                let n = 0;
+                for (const name of seeds) {
+                  const r = db.items.updateOne({ name: name },
+                    { $setOnInsert: { name: name, created_at: new Date().toISOString() } },
+                    { upsert: true });
+                  if (r.upsertedCount > 0) n++;
+                }
+                print("==> inserted " + n + " new, total " + db.items.countDocuments());
+              '
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 300m, memory: 256Mi }
+{{- end }}

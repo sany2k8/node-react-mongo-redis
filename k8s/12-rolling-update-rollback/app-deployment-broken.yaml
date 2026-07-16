@@ -1,0 +1,66 @@
+# Step 12b — A rollout that FAILS on purpose
+#
+# The image tag does not exist. Apply this and watch:
+#   - the new ReplicaSet's pod goes ImagePullBackOff
+#   - maxUnavailable:0 means the OLD pods are NEVER touched
+#   - your app KEEPS SERVING throughout the failed rollout
+#   - after progressDeadlineSeconds, Progressing=False / ProgressDeadlineExceeded
+#   - Kubernetes does NOT roll back for you. You do it.
+#
+# That last point is the lesson. Then: kubectl rollout undo deploy/app
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+  namespace: node-react-mongo-redis
+  labels:
+    app: node-react-mongo-redis
+    component: app
+  annotations:
+    kubernetes.io/change-cause: "BROKEN: deploy v99 (tag does not exist)"
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+  minReadySeconds: 10
+  progressDeadlineSeconds: 60 # short, so you don't wait around
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0 # THE safety net — old pods stay up
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: node-react-mongo-redis
+      component: app
+  template:
+    metadata:
+      labels:
+        app: node-react-mongo-redis
+        component: app
+        version: v99
+    spec:
+      containers:
+        - name: app
+          image: sany2k8/node-react-mongo-redis-app:v99-does-not-exist
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: app-config
+            - secretRef:
+                name: app-secret
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 96Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi

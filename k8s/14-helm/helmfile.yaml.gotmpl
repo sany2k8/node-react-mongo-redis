@@ -1,0 +1,91 @@
+# Helmfile — declarative management of Helm RELEASES.
+#
+# ⚠️ FILENAME MATTERS: this is `helmfile.yaml.gotmpl`, not `helmfile.yaml`.
+# Since Helmfile v1, a plain `helmfile.yaml` is NOT run through the Go template
+# engine, so `{{ .Environment.Name }}` below would blow up with:
+#
+#   failed to read helmfile.yaml: reading document at index 1.
+#   Started seeing this since Helmfile v1? Add the .gotmpl file extension:
+#   yaml: invalid map key: map[string]interface{}{".Environment.Name":...}
+#
+# The .gotmpl extension is what enables templating. Helmfile finds it automatically.
+#
+# Helm answers "what is in this release?".
+# Helmfile answers "which releases exist, in which environments, with what values?"
+#
+# Without it you end up with a pile of shell:
+#   helm upgrade --install nrmr-dev ./nrmr -n dev -f environments/dev.yaml --set ...
+#   helm upgrade --install nrmr-prod ./nrmr -n prod -f environments/prod.yaml --set ...
+# ...which nobody keeps in sync, and which has no diff and no ordering.
+#
+# Usage:
+#   helmfile -e dev  diff        # what WOULD change (do this first, always)
+#   helmfile -e dev  apply       # diff + sync only if there are changes
+#   helmfile -e dev  sync        # force helm upgrade --install regardless
+#   helmfile -e prod apply
+#   helmfile -e dev  destroy
+#   helmfile -e dev  template    # render locally, no cluster needed
+#   helmfile -e prod test        # run each release's helm tests
+
+# -----------------------------------------------------------------------------
+# Environments — the whole point. Same chart, different values, per env.
+# -----------------------------------------------------------------------------
+environments:
+  dev:
+    values:
+      - environments/dev.yaml
+  prod:
+    values:
+      - environments/prod.yaml
+  # `missingFileHandler: Error` (the default) fails loudly on a typo'd path.
+  # That's what you want — a silently-missing values file deploys defaults to prod.
+
+---
+# -----------------------------------------------------------------------------
+# Repositories — for charts you don't vendor. Ours is a local path, so this is
+# only here to show the shape.
+# -----------------------------------------------------------------------------
+repositories:
+  - name: bitnami
+    url: https://charts.bitnami.com/bitnami
+
+# -----------------------------------------------------------------------------
+# Releases
+# -----------------------------------------------------------------------------
+releases:
+  - name: nrmr-{{ .Environment.Name }}
+    namespace: node-react-mongo-redis
+    chart: ./nrmr
+
+    # createNamespace: true    # would create it; ours exists from step 1
+
+    # Wait for every resource to be Ready before declaring success. Combined
+    # with `atomic`, this is what makes a deploy either fully work or fully
+    # revert — the auto-rollback Kubernetes itself refuses to do (step 12).
+    wait: true
+    timeout: 600
+    atomic: true
+
+    # Run the chart's helm tests as part of `helmfile test`
+    installedTemplate: "true"
+
+    values:
+      - environments/{{ .Environment.Name }}.yaml
+
+      # Inline values are templated by HELMFILE (not Helm) before being handed
+      # over. Handy for injecting CI metadata.
+      - app:
+          podAnnotations:
+            deployed-by: helmfile
+            environment: {{ .Environment.Name }}
+
+    # ⚠️ SECRETS: never do this with real credentials.
+    #   secrets:
+    #     - environments/{{ .Environment.Name }}.secrets.yaml   # SOPS-encrypted
+    # `helmfile` decrypts via the helm-secrets plugin at apply time, so the
+    # repo only ever holds ciphertext.
+
+    # Ordering. Helmfile resolves a DAG from `needs` and applies in order —
+    # this is what Helm alone cannot do across releases.
+    #   needs:
+    #     - infra/cert-manager

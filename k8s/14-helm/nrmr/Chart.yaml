@@ -1,0 +1,45 @@
+# apiVersion v2 = Helm 3/4 chart format (v1 was Helm 2). Always v2 for new charts.
+apiVersion: v2
+name: nrmr
+description: Node + React + MongoDB + Redis — the full stack from steps 1-13, as one chart
+type: application
+
+# TWO DIFFERENT VERSIONS. This trips everyone up:
+#
+#   version    = the CHART's version. Bump on ANY chart change (template edit,
+#                default value change). Must be SemVer. This is what
+#                `helm search`, `helm upgrade`, and chart repos key on.
+#
+#   appVersion = the version of the SOFTWARE being deployed. Informational only —
+#                Helm never parses it. Used here as the default image tag.
+#
+# Change a template? Bump `version`, not `appVersion`.
+# Ship app v3?       Bump `appVersion` (and `version`, because the chart changed).
+version: 0.1.0
+appVersion: "v2"
+
+keywords: [node, react, mongodb, redis, kubernetes-lab]
+home: https://github.com/sany2k8/node-react-mongo-redis
+sources:
+  - https://github.com/sany2k8/node-react-mongo-redis
+
+maintainers:
+  - name: sany2k8
+
+# Subcharts would go here. Note that in the real world you would NOT hand-roll
+# mongo/redis like this chart does — you'd depend on the Bitnami charts:
+#
+# dependencies:
+#   - name: mongodb
+#     version: "15.x.x"
+#     repository: https://charts.bitnami.com/bitnami
+#     condition: mongodb.enabled     # <- lets values.yaml switch it off
+#   - name: redis
+#     version: "19.x.x"
+#     repository: https://charts.bitnami.com/bitnami
+#     condition: redis.enabled
+#
+# Then: helm dependency update ./nrmr    (writes Chart.lock + charts/*.tgz)
+#
+# They're inlined here so you can read every template — which is the point of
+# the lab. Ship the Bitnami ones in production.

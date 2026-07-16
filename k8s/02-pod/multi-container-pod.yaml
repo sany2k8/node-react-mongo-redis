@@ -1,0 +1,66 @@
+# Step 2b — A multi-container Pod (the sidecar pattern)
+#
+# This exists to prove ONE point: containers in a Pod share a network namespace.
+# The sidecar talks to the app over http://localhost:3000 — no Service, no DNS,
+# no IP. That is only possible because they are in the same Pod.
+#
+# It also shows an initContainer, which runs to completion BEFORE the app
+# container starts. That is the idiomatic way to gate startup on a dependency.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: app-pod-with-sidecar
+  namespace: node-react-mongo-redis
+  labels:
+    app: node-react-mongo-redis
+    component: app
+    variant: sidecar
+spec:
+  initContainers:
+    # Runs first, must exit 0 before any container below starts.
+    - name: init-wait
+      image: busybox:1.36
+      command: ["sh", "-c", "echo 'init: preparing shared volume'; echo 'hello from init' > /shared/init.log; sleep 2"]
+      volumeMounts:
+        - name: shared-data
+          mountPath: /shared
+
+  containers:
+    - name: app
+      image: sany2k8/node-react-mongo-redis-app:v1
+      imagePullPolicy: IfNotPresent
+      ports:
+        - name: http
+          containerPort: 3000
+      volumeMounts:
+        - name: shared-data
+          mountPath: /shared
+
+    # The sidecar. Note it curls LOCALHOST — same Pod, same network namespace.
+    - name: poller
+      image: curlimages/curl:latest
+      command:
+        - sh
+        - -c
+        - |
+          cat /shared/init.log
+          while true; do
+            echo "[poller] $(curl -s --max-time 2 http://localhost:3000/api/health || echo 'app not up yet')"
+            sleep 10
+          done
+      volumeMounts:
+        - name: shared-data
+          mountPath: /shared
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+        limits:
+          cpu: 50m
+          memory: 32Mi
+
+  volumes:
+    # emptyDir lives and dies with the Pod. It is NOT durable storage —
+    # that's step 9. It exists here purely to be shared between containers.
+    - name: shared-data
+      emptyDir: {}

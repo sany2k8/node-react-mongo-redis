@@ -1,0 +1,86 @@
+# Step 11 — HorizontalPodAutoscaler
+#
+# The HPA is itself a reconciliation loop (step 4's pattern again). Every 15s it:
+#   1. reads pod metrics from metrics.k8s.io (served by metrics-server)
+#   2. computes: desired = ceil(current * (currentMetric / targetMetric))
+#   3. writes the result to the Deployment's /scale subresource
+#
+# It does NOT touch pods directly — it just changes `replicas` and lets the
+# Deployment -> ReplicaSet -> Pod chain do the work.
+#
+# NOTE: use autoscaling/v2. v1 only supports CPU and is effectively legacy.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: app-hpa
+  namespace: node-react-mongo-redis
+  labels:
+    app: node-react-mongo-redis
+    component: app
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: app # must expose a /scale subresource — Deployments do
+
+  minReplicas: 2
+  maxReplicas: 8 # kept under the namespace ResourceQuota from step 1
+
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          # ############################################################
+          # #  averageUtilization is a PERCENTAGE OF THE POD'S REQUEST, #
+          # #  *NOT* of the limit, and *NOT* of the node's capacity.    #
+          # #                                                           #
+          # #  This app requests cpu: 100m, so 50% = 50m of actual CPU. #
+          # #                                                           #
+          # #  Corollary: a Pod with NO cpu request cannot be scaled on #
+          # #  CPU utilization at all — the HPA reports <unknown> and   #
+          # #  never scales. This is THE most common broken-HPA cause.  #
+          # ############################################################
+          averageUtilization: 50
+
+    # A second metric. The HPA computes a desired replica count for EVERY metric
+    # and takes the HIGHEST. Metrics can only ever scale you UP relative to
+    # each other — never down.
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: AverageValue
+          averageValue: 150Mi # AverageValue = an absolute number, not a %
+
+  # `behavior` (k8s 1.18+) is how you stop flapping. Without it you get the
+  # defaults noted below.
+  behavior:
+    scaleUp:
+      # How far back the HPA looks when scaling UP. It uses the *lowest*
+      # recommendation in this window, so a single CPU spike can't stampede.
+      # Default: 0s (react instantly).
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Percent
+          value: 100 # at most double...
+          periodSeconds: 15 # ...every 15s
+        - type: Pods
+          value: 4 # ...or at most +4 pods per 15s
+          periodSeconds: 15
+      selectPolicy: Max # of the policies above, allow the most permissive
+
+    scaleDown:
+      # The big one. Default is 300s (5 min): after load drops, the HPA waits
+      # 5 minutes before scaling in, using the *highest* recommendation in the
+      # window. That's deliberate — scaling down eagerly then back up is worse
+      # than paying for a few extra pods.
+      #
+      # Set to 60s here only so the lab doesn't bore you. Leave it at 300 in prod.
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Percent
+          value: 50 # remove at most half the pods per minute
+          periodSeconds: 60
+      selectPolicy: Min # be conservative on the way down

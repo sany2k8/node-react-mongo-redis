@@ -1,0 +1,54 @@
+# PROD: durable, autoscaled, defensive.
+app:
+  replicaCount: 3
+  image:
+    tag: v2
+  service:
+    type: NodePort
+    # 30301, not 30300: step 6's app-nodeport Service already owns 30300, and
+    # nodePorts are CLUSTER-WIDE (namespaces don't isolate them). Using 30301
+    # lets the Helm release coexist with the step-by-step manifests.
+    nodePort: 30301
+  resources:
+    requests: { cpu: 100m, memory: 96Mi }
+    limits:   { cpu: 300m, memory: 256Mi }
+  config:
+    NODE_ENV: production
+    PORT: "3000"
+  preStopSleepSeconds: 5
+  minReadySeconds: 5
+
+  # Spread replicas across nodes so one node loss doesn't take the app down.
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            topologyKey: kubernetes.io/hostname
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: nrmr
+                app.kubernetes.io/component: app
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 50
+  behavior:
+    scaleDownStabilizationSeconds: 300   # the production default — scale in slow
+
+mongodb:
+  persistence:
+    enabled: true
+    size: 2Gi
+redis:
+  persistence:
+    enabled: true
+    size: 512Mi
+
+# In a real prod you would NOT put these here — see auth.existingSecret.
+auth:
+  mongoUser: appuser
+  mongoPassword: "s3cr3t-p@ss"
+  redisPassword: "r3d1s-s3cr3t"

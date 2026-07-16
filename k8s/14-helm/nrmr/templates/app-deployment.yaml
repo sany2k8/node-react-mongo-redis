@@ -1,0 +1,136 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nrmr.fullname" . }}-app
+  labels:
+    {{- include "nrmr.componentLabels" (dict "ctx" . "component" "app") | nindent 4 }}
+  annotations:
+    kubernetes.io/change-cause: {{ printf "Helm %s to %s (revision %d)" .Release.Name (include "nrmr.appImage" .) .Release.Revision | quote }}
+spec:
+  {{/*
+    THE HPA CONFLICT (step 11). If autoscaling is on, omit `replicas` entirely.
+    Emit it and every `helm upgrade` resets replicas to the chart default, then
+    the HPA corrects it — a pointless scale down/up on every single deploy.
+  */}}
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.app.replicaCount }}
+  {{- end }}
+  revisionHistoryLimit: {{ .Values.app.revisionHistoryLimit }}
+  minReadySeconds: {{ .Values.app.minReadySeconds }}
+  progressDeadlineSeconds: {{ .Values.app.progressDeadlineSeconds }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: {{ .Values.app.strategy.maxUnavailable }}
+      maxSurge: {{ .Values.app.strategy.maxSurge }}
+  selector:
+    matchLabels:
+      {{- include "nrmr.componentSelectorLabels" (dict "ctx" . "component" "app") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "nrmr.componentLabels" (dict "ctx" . "component" "app") | nindent 8 }}
+      annotations:
+        {{/*
+          ★ THE CHECKSUM TRICK ★  — this is the single most valuable idiom in
+          this chart, and the fix for the gotcha proved in step 8: env vars from
+          a ConfigMap/Secret are frozen at container start and NEVER update.
+
+          Hashing the rendered ConfigMap/Secret into the POD TEMPLATE means any
+          config change becomes a template change, which triggers a rolling
+          update automatically. Change a password, and the pods actually pick it
+          up. Without this, `helm upgrade` silently leaves them on old values.
+        */}}
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if not .Values.auth.existingSecret }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- end }}
+        {{- with .Values.app.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      terminationGracePeriodSeconds: {{ .Values.app.terminationGracePeriodSeconds }}
+      containers:
+        - name: app
+          image: {{ include "nrmr.appImage" . | quote }}
+          imagePullPolicy: {{ .Values.app.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "nrmr.configMapName" . }}
+            - secretRef:
+                name: {{ include "nrmr.secretName" . }}
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+
+          {{- if .Values.app.probes.startup.enabled }}
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: {{ .Values.app.probes.startup.periodSeconds }}
+            failureThreshold: {{ .Values.app.probes.startup.failureThreshold }}
+          {{- end }}
+
+          {{- if .Values.app.probes.liveness.enabled }}
+          livenessProbe:
+            # /api/health touches NO dependency — see step 13 for why that matters
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: {{ .Values.app.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.app.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.app.probes.liveness.failureThreshold }}
+          {{- end }}
+
+          {{- if .Values.app.probes.readiness.enabled }}
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: {{ .Values.app.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.app.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.app.probes.readiness.failureThreshold }}
+          {{- end }}
+
+          {{- if gt (int .Values.app.preStopSleepSeconds) 0 }}
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep {{ .Values.app.preStopSleepSeconds }}"]
+          {{- end }}
+
+          resources:
+            {{- toYaml .Values.app.resources | nindent 12 }}
+
+          volumeMounts:
+            - name: config
+              mountPath: /etc/app-config
+              readOnly: true
+
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "nrmr.configMapName" . }}
+            items:
+              - key: app-info.json
+                path: app-info.json
+
+      {{- with .Values.app.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.app.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.app.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -1,0 +1,54 @@
+# Step 6 — App Service (ClusterIP)
+#
+# The internal front door for the app. Other Pods reach it at http://app
+# regardless of how many replicas exist or how often they're replaced.
+#
+# Note port 80 -> targetPort 3000: the Service port and the container port are
+# independent. Callers use `http://app` (implicit :80); the Service rewrites the
+# destination to a healthy Pod's :3000.
+apiVersion: v1
+kind: Service
+metadata:
+  name: app
+  namespace: node-react-mongo-redis
+  labels:
+    app: node-react-mongo-redis
+    component: app
+spec:
+  type: ClusterIP
+  selector:
+    app: node-react-mongo-redis
+    component: app
+  ports:
+    - name: http
+      port: 80
+      targetPort: http # the named port from the Deployment's containers[].ports
+      protocol: TCP
+---
+# A HEADLESS Service (clusterIP: None). No virtual IP, no load balancing —
+# DNS returns the A records of every matching Pod instead.
+#
+#   $ nslookup app-headless
+#   -> 10.244.1.5, 10.244.2.7, 10.244.2.8   (all three pods)
+#
+# This is what StatefulSets use to give each Pod a stable DNS name, and what
+# clients that do their own load balancing (gRPC, database drivers with
+# connection pools) usually want.
+apiVersion: v1
+kind: Service
+metadata:
+  name: app-headless
+  namespace: node-react-mongo-redis
+  labels:
+    app: node-react-mongo-redis
+    component: app
+spec:
+  type: ClusterIP
+  clusterIP: None # <-- headless
+  selector:
+    app: node-react-mongo-redis
+    component: app
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http

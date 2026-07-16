@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "nrmr.configMapName" . }}
+  labels:
+    {{- include "nrmr.componentLabels" (dict "ctx" . "component" "app") | nindent 4 }}
+data:
+  {{/*
+    range over a map yields key,value. `$` is the ROOT context — inside range,
+    `.` is the current VALUE, so .Values would break here.
+    `quote` matters: a ConfigMap's data values must be strings. Without it,
+    PORT: 3000 would render as an int and the API server rejects it.
+  */}}
+  {{- range $key, $value := .Values.app.config }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+
+  # Service discovery — templated so the values track the actual Service names.
+  MONGO_HOST: {{ include "nrmr.mongoServiceName" . | quote }}
+  MONGO_PORT: "27017"
+  REDIS_HOST: {{ include "nrmr.redisServiceName" . | quote }}
+  REDIS_PORT: "6379"
+
+  app-info.json: |
+    {
+      "release": {{ .Release.Name | quote }},
+      "namespace": {{ .Release.Namespace | quote }},
+      "chart": {{ include "nrmr.chart" . | quote }},
+      "appVersion": {{ .Chart.AppVersion | quote }},
+      "revision": {{ .Release.Revision | quote }},
+      "managedBy": "Helm"
+    }

@@ -1,0 +1,75 @@
+# Step 10d — CronJob
+#
+# A CronJob is a Job factory on a schedule. It creates a Job object per tick;
+# that Job creates the Pod. Three objects deep:
+#
+#   CronJob ──every 2 min──► Job ──► Pod
+#
+# This one reports the item count — stand in for a nightly report, a backup,
+# a cleanup sweep.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: item-report
+  namespace: node-react-mongo-redis
+  labels:
+    app: node-react-mongo-redis
+    component: cron
+spec:
+  # standard cron: minute hour day-of-month month day-of-week
+  # every 2 minutes, so you don't wait around during the lab
+  schedule: "*/2 * * * *"
+
+  # Cron runs in the kube-controller-manager's timezone (usually UTC) unless
+  # you set this. Getting this wrong is how a "midnight" backup runs at 5pm.
+  timeZone: "Etc/UTC"
+
+  # What if the previous run is still going when the next tick arrives?
+  #   Forbid  = skip the new one (right for backups/migrations — no overlap)
+  #   Allow   = run both concurrently (default)
+  #   Replace = kill the old, start the new
+  concurrencyPolicy: Forbid
+
+  # If the controller was down and a tick was missed, how late may it still
+  # start? Without this, a controller outage can trigger a thundering herd of
+  # every missed run at once. 100 missed schedules = CronJob stops permanently.
+  startingDeadlineSeconds: 60
+
+  successfulJobsHistoryLimit: 3 # keep the last 3 successes for log inspection
+  failedJobsHistoryLimit: 2
+
+  # suspend: true    # <- pause without deleting. Flip it during an incident.
+
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 120
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: report
+              image: mongo:7.0
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: MONGO_USER
+                  valueFrom:
+                    secretKeyRef: { name: app-secret, key: MONGO_USER }
+                - name: MONGO_PASSWORD
+                  valueFrom:
+                    secretKeyRef: { name: app-secret, key: MONGO_PASSWORD }
+                - name: MONGO_HOST
+                  valueFrom:
+                    configMapKeyRef: { name: app-config, key: MONGO_HOST }
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  mongosh "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@${MONGO_HOST}:27017/labdb?authSource=admin" \
+                    --quiet --eval '
+                      print("[report] " + new Date().toISOString());
+                      print("[report] total items: " + db.items.countDocuments());
+                    '
+              resources:
+                requests: { cpu: 50m, memory: 128Mi }
+                limits: { cpu: 200m, memory: 256Mi }

@@ -1,0 +1,65 @@
+# Step 9 — Mongo with DURABLE storage
+#
+# The only difference from step 8 is the `volumes:` block at the bottom:
+#   emptyDir: {}   ->   persistentVolumeClaim: { claimName: mongo-data }
+#
+# That one change is the difference between a database with amnesia and a
+# database.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongo
+  namespace: node-react-mongo-redis
+  labels:
+    app: node-react-mongo-redis
+    component: mongo
+spec:
+  replicas: 1
+  # Recreate is MANDATORY here, not a preference. A ReadWriteOnce volume plus a
+  # RollingUpdate = the new Pod tries to attach a volume the old Pod still holds.
+  # On a cloud provider the new Pod hangs in ContainerCreating with
+  # "Multi-Attach error for volume". Recreate kills the old Pod first.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: node-react-mongo-redis
+      component: mongo
+  template:
+    metadata:
+      labels:
+        app: node-react-mongo-redis
+        component: mongo
+    spec:
+      containers:
+        - name: mongo
+          image: mongo:7.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: mongo
+              containerPort: 27017
+          env:
+            - name: MONGO_INITDB_ROOT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: app-secret
+                  key: MONGO_USER
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: app-secret
+                  key: MONGO_PASSWORD
+          volumeMounts:
+            - name: data
+              mountPath: /data/db
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: mongo-data # <-- the durable bit

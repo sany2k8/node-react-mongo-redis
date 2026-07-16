@@ -1,0 +1,56 @@
+# Step 9 — Redis with durable storage (AOF survives restarts)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: node-react-mongo-redis
+  labels:
+    app: node-react-mongo-redis
+    component: redis
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: node-react-mongo-redis
+      component: redis
+  template:
+    metadata:
+      labels:
+        app: node-react-mongo-redis
+        component: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["redis-server"]
+          args:
+            - "--requirepass"
+            - "$(REDIS_PASSWORD)"
+            - "--appendonly" # write an append-only file to /data...
+            - "yes" # ...which is now on a PVC, so it survives
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: app-secret
+                  key: REDIS_PASSWORD
+          ports:
+            - name: redis
+              containerPort: 6379
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: redis-data

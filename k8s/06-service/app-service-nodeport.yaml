@@ -1,0 +1,47 @@
+# Step 6 — App Service (NodePort)
+#
+# NodePort opens the SAME port on EVERY node in the cluster and forwards it to
+# the Service. It is a superset of ClusterIP — creating a NodePort also gives
+# you a cluster IP and the internal DNS name.
+#
+#   client -> <any-node-ip>:30300 -> Service -> one of the app Pods :3000
+#
+# The nodePort number is a CLUSTER-WIDE resource — namespaces do not isolate it.
+# 30080 is deliberately avoided here because the `taskhub` namespace in this
+# cluster already owns it, and the API server rejects the duplicate:
+#
+#   The Service "app-nodeport" is invalid: spec.ports[0].nodePort:
+#   Invalid value: 30080: provided port is already allocated
+#
+# Reachability on Docker Desktop / kind: Docker Desktop publishes node ports to
+# localhost automatically, so http://localhost:30300 just works. On a raw kind
+# cluster you would need `extraPortMappings` in the kind config.
+#
+# In real clusters you would use an Ingress or a LoadBalancer instead —
+# NodePort's port range (30000-32767) and "every node, same port" model don't
+# scale to many services.
+apiVersion: v1
+kind: Service
+metadata:
+  name: app-nodeport
+  namespace: node-react-mongo-redis
+  labels:
+    app: node-react-mongo-redis
+    component: app
+spec:
+  type: NodePort
+  selector:
+    app: node-react-mongo-redis
+    component: app
+  ports:
+    - name: http
+      port: 80 # cluster-internal port on this Service
+      targetPort: http # port on the Pod
+      nodePort: 30300 # port on every node. Omit it and you get a random free one.
+      protocol: TCP
+
+  # Cluster = any node can serve it; kube-proxy may hop to another node, which
+  #           balances evenly but hides the client's real source IP (SNAT).
+  # Local   = only nodes running a Pod respond; preserves the client IP but
+  #           traffic is unbalanced if Pods aren't spread evenly.
+  externalTrafficPolicy: Cluster

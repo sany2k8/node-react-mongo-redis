@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nrmr.fullname" . }}-app
+  labels:
+    {{- include "nrmr.componentLabels" (dict "ctx" . "component" "app") | nindent 4 }}
+spec:
+  type: {{ .Values.app.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.app.service.port }}
+      targetPort: http
+      protocol: TCP
+      {{/*
+        nodePort is only legal when type is NodePort or LoadBalancer — the API
+        server rejects it on a ClusterIP Service. Hence the guard.
+      */}}
+      {{- if and (eq .Values.app.service.type "NodePort") .Values.app.service.nodePort }}
+      nodePort: {{ .Values.app.service.nodePort }}
+      {{- end }}
+  selector:
+    {{- include "nrmr.componentSelectorLabels" (dict "ctx" . "component" "app") | nindent 4 }}

@@ -1,0 +1,103 @@
+# Step 8 — App, wired to the ConfigMap and Secret
+#
+# Compare this to 05-deployment/app-deployment.yaml: the hardcoded env block is
+# gone. The image is identical — only its configuration source changed.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+  namespace: node-react-mongo-redis
+  labels:
+    app: node-react-mongo-redis
+    component: app
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: node-react-mongo-redis
+      component: app
+  template:
+    metadata:
+      labels:
+        app: node-react-mongo-redis
+        component: app
+        version: v1
+      annotations:
+        # THE CHECKSUM TRICK — remember this one.
+        #
+        # Env vars from a ConfigMap/Secret are injected at CONTAINER START and
+        # never change afterwards. Edit the ConfigMap and running Pods keep the
+        # OLD values forever; nothing restarts them.
+        #
+        # Changing this annotation changes the Pod template, which triggers a
+        # rolling update. Helm computes it automatically (see step 14):
+        #   checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        #
+        # Bump it by hand here, or just run:
+        #   kubectl rollout restart deploy/app -n node-react-mongo-redis
+        checksum/config: "manually-bump-me-when-config-changes-001"
+    spec:
+      containers:
+        - name: app
+          image: sany2k8/node-react-mongo-redis-app:v1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+
+          # envFrom = import EVERY key as an env var of the same name.
+          # Concise, but you lose the explicit contract — you can't tell what
+          # the app consumes by reading this file. Fine for a lab; for prod,
+          # many teams prefer listing each key with valueFrom.
+          envFrom:
+            - configMapRef:
+                name: app-config
+            - secretRef:
+                name: app-secret
+
+          env:
+            # Individual keys still work alongside envFrom and OVERRIDE it —
+            # `env` wins over `envFrom` on a key collision.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+
+          volumeMounts:
+            # The ConfigMap's app-info.json, as a real file on disk.
+            - name: config-volume
+              mountPath: /etc/app-config
+              readOnly: true
+            # Secrets as files. This is what you do for TLS certs, kubeconfigs,
+            # service-account JSON — anything that must be a file, not an env var.
+            - name: secret-volume
+              mountPath: /etc/app-secret
+              readOnly: true
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 96Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+
+      volumes:
+        - name: config-volume
+          configMap:
+            name: app-config
+            items:
+              # Project ONLY this key. Without `items`, EVERY key becomes a file —
+              # including MONGO_HOST, PORT, etc. Rarely what you want.
+              - key: app-info.json
+                path: app-info.json
+        - name: secret-volume
+          secret:
+            secretName: app-secret
+            defaultMode: 0400 # owner read-only. Secrets should never be 0644.

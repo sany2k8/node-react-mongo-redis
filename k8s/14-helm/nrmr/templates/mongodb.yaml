@@ -1,0 +1,113 @@
+{{- if .Values.mongodb.enabled }}
+{{/*
+`enabled` gates the whole file. This is how a chart lets you swap the bundled
+database for a managed one (Atlas, DocumentDB): mongodb.enabled=false, then
+point MONGO_HOST at the external endpoint.
+*/}}
+{{- if .Values.mongodb.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "nrmr.fullname" . }}-mongodb
+  labels:
+    {{- include "nrmr.componentLabels" (dict "ctx" . "component" "mongodb") | nindent 4 }}
+  annotations:
+    # Helm DELETES PVCs on uninstall. For a database that is usually catastrophic
+    # and always surprising. `keep` orphans the PVC instead — you delete it by
+    # hand when you actually mean it.
+    "helm.sh/resource-policy": keep
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.mongodb.persistence.size }}
+  {{- if .Values.mongodb.persistence.storageClass }}
+  storageClassName: {{ .Values.mongodb.persistence.storageClass }}
+  {{- end }}
+---
+{{- end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nrmr.mongoServiceName" . }}
+  labels:
+    {{- include "nrmr.componentLabels" (dict "ctx" . "component" "mongodb") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: mongo
+      port: 27017
+      targetPort: mongo
+  selector:
+    {{- include "nrmr.componentSelectorLabels" (dict "ctx" . "component" "mongodb") | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nrmr.fullname" . }}-mongodb
+  labels:
+    {{- include "nrmr.componentLabels" (dict "ctx" . "component" "mongodb") | nindent 4 }}
+spec:
+  replicas: 1
+  # Single-writer: never two pods on one RWO volume (step 9)
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "nrmr.componentSelectorLabels" (dict "ctx" . "component" "mongodb") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "nrmr.componentLabels" (dict "ctx" . "component" "mongodb") | nindent 8 }}
+    spec:
+      containers:
+        - name: mongodb
+          image: "{{ .Values.mongodb.image.repository }}:{{ .Values.mongodb.image.tag }}"
+          imagePullPolicy: {{ .Values.mongodb.image.pullPolicy }}
+          ports:
+            - name: mongo
+              containerPort: 27017
+          env:
+            - name: MONGO_INITDB_ROOT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "nrmr.secretName" . }}
+                  key: MONGO_USER
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "nrmr.secretName" . }}
+                  key: MONGO_PASSWORD
+          startupProbe:
+            exec:
+              command: ["mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+            periodSeconds: 3
+            failureThreshold: 40
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command: ["mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 2
+          volumeMounts:
+            - name: data
+              mountPath: /data/db
+          resources:
+            {{- toYaml .Values.mongodb.resources | nindent 12 }}
+      volumes:
+        - name: data
+          {{- if .Values.mongodb.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "nrmr.fullname" . }}-mongodb
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+{{- end }}

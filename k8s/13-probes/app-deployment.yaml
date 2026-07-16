@@ -1,0 +1,152 @@
+# Step 13 — The app, properly probed
+#
+# THE RULE THAT MATTERS MOST:
+#
+#   livenessProbe  -> "should I KILL this container?"      (restart)
+#   readinessProbe -> "should I send it TRAFFIC?"          (endpoints in/out)
+#   startupProbe   -> "has it finished booting yet?"       (gates the other two)
+#
+# Liveness must NEVER check a dependency. If your liveness probe pings Mongo and
+# Mongo hiccups, every app pod fails liveness, every pod restarts, and you have
+# converted a database blip into a full application outage — while the restarts
+# make recovery slower. Readiness may check dependencies; liveness may not.
+#
+# This is why the app's /api/health deliberately does NOT touch Mongo or Redis,
+# while /api/network-info does.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+  namespace: node-react-mongo-redis
+  labels:
+    app: node-react-mongo-redis
+    component: app
+  annotations:
+    kubernetes.io/change-cause: "Add liveness/readiness/startup probes"
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+  minReadySeconds: 5
+  progressDeadlineSeconds: 180
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: node-react-mongo-redis
+      component: app
+  template:
+    metadata:
+      labels:
+        app: node-react-mongo-redis
+        component: app
+        version: v2
+    spec:
+      # Give in-flight requests time to finish before SIGKILL. The sequence on
+      # pod deletion is:
+      #   1. pod marked Terminating + REMOVED FROM ENDPOINTS (in parallel!)
+      #   2. preStop hook runs
+      #   3. SIGTERM to PID 1
+      #   4. wait up to terminationGracePeriodSeconds
+      #   5. SIGKILL
+      terminationGracePeriodSeconds: 30
+
+      containers:
+        - name: app
+          image: sany2k8/node-react-mongo-redis-app:v2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+
+          envFrom:
+            - configMapRef:
+                name: app-config
+            - secretRef:
+                name: app-secret
+
+          # ---- STARTUP PROBE -------------------------------------------------
+          # Runs FIRST and alone. Liveness and readiness are completely disabled
+          # until this succeeds once. This is how you support a slow-booting app
+          # without weakening liveness afterwards.
+          #
+          # Budget = failureThreshold × periodSeconds = 30 × 2s = 60s to boot.
+          # Exceed it and the container is killed and restarted.
+          #
+          # Before startupProbe existed you had to set a huge
+          # initialDelaySeconds on liveness, which meant a hung container took
+          # that long to be noticed FOREVER, not just at boot. This is strictly
+          # better.
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+            timeoutSeconds: 2
+
+          # ---- LIVENESS PROBE ------------------------------------------------
+          # "Is this process wedged?" Failure => kubelet KILLS the container and
+          # restarts it (RESTARTS column increments).
+          #
+          # NOTE: /api/health checks NOTHING but the event loop. That is correct
+          # and deliberate. A liveness probe should only fail for problems a
+          # RESTART can fix — a deadlock, a wedged event loop, an OOM spiral.
+          # A dependency being down is not one of those.
+          #
+          # failureThreshold: 3 × periodSeconds: 10 = ~30s to notice a wedge.
+          # Be conservative: a trigger-happy liveness probe causes outages.
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+            successThreshold: 1 # must be 1 for liveness; the API rejects >1
+
+          # ---- READINESS PROBE -----------------------------------------------
+          # "Should this pod get traffic?" Failure => the pod is REMOVED FROM
+          # THE SERVICE'S ENDPOINTS. The container keeps running and is NOT
+          # restarted. This is the probe that makes zero-downtime rollouts real
+          # (step 12) — maxUnavailable:0 is meaningless without it.
+          #
+          # Tighter than liveness on purpose: pull traffic fast (2 failures =
+          # ~6s), restart slow (3 failures = ~30s).
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+              # httpHeaders:
+              #   - name: X-Probe
+              #     value: readiness
+            initialDelaySeconds: 2
+            periodSeconds: 3
+            timeoutSeconds: 2
+            failureThreshold: 2
+            successThreshold: 1
+
+          lifecycle:
+            preStop:
+              exec:
+                # THE GRACEFUL-SHUTDOWN RACE: endpoint removal and SIGTERM happen
+                # in PARALLEL, and endpoint removal must propagate to every
+                # kube-proxy on every node. If the app exits on SIGTERM instantly,
+                # in-flight requests get connection-refused for a second or two.
+                #
+                # Sleeping here delays SIGTERM, giving endpoint removal time to
+                # land everywhere. The pod is already out of rotation, so this
+                # costs nothing but a few seconds of shutdown.
+                #
+                # This is the standard fix for "we get 502s on every deploy".
+                command: ["sh", "-c", "sleep 5"]
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 96Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi

@@ -17,6 +17,7 @@ The single multi-stage `Dockerfile` builds the React frontend, copies the produc
 - [Architecture Diagram](#architecture-diagram)
 - [Prerequisites](#prerequisites)
 - [Quick Start with Docker Compose](#quick-start-with-docker-compose)
+- [Kubernetes](#kubernetes)
 - [Local Development (No Docker)](#local-development-no-docker)
 - [Building and Pushing to Docker Hub](#building-and-pushing-to-docker-hub)
 - [API Endpoints](#api-endpoints)
@@ -101,6 +102,52 @@ docker compose down
 
 # Stop and remove containers AND delete volumes (fresh start)
 docker compose down -v
+```
+
+---
+
+## Kubernetes
+
+A complete, hands-on Kubernetes course built on this project lives in **[`k8s/`](k8s/README.md)** —
+14 steps from Namespace to Helm, every manifest applied to a real cluster and verified.
+
+```bash
+cd k8s
+kubectl apply -f 01-namespace/namespace.yaml
+kubectl config set-context --current --namespace=node-react-mongo-redis
+open README.md
+```
+
+| # | Step | # | Step |
+| - | ---- | - | ---- |
+| 1 | [Namespace](k8s/01-namespace/README.md) | 8 | [ConfigMap & Secret](k8s/08-configmap-secret/README.md) |
+| 2 | [Pod](k8s/02-pod/README.md) | 9 | [PersistentVolume & PVC](k8s/09-persistent-volume/README.md) |
+| 3 | [Labels & Selectors](k8s/03-labels-selectors/README.md) | 10 | [Jobs](k8s/10-jobs/README.md) |
+| 4 | [ReplicaSet](k8s/04-replicaset/README.md) | 11 | [HPA](k8s/11-hpa/README.md) |
+| 5 | [Deployment](k8s/05-deployment/README.md) | 12 | [Rolling Updates & Rollbacks](k8s/12-rolling-update-rollback/README.md) |
+| 6 | [Service](k8s/06-service/README.md) | 13 | [Probes](k8s/13-probes/README.md) |
+| 7 | [Port Forwarding](k8s/07-port-forward/README.md) | 14 | [Helm & Helmfile](k8s/14-helm/README.md) |
+
+Or skip to the finished product:
+
+```bash
+helm install nrmr ./k8s/14-helm/nrmr -f k8s/14-helm/environments/prod.yaml \
+  -n node-react-mongo-redis --create-namespace --wait
+helm test nrmr -n node-react-mongo-redis --logs
+```
+
+### Optional credentials
+
+The backend accepts **optional** `MONGO_USER` / `MONGO_PASSWORD` / `REDIS_PASSWORD`
+so the Kubernetes lab can demonstrate Secrets with real authentication. When they
+are unset the connection strings are byte-for-byte what they always were, so the
+Docker Compose stack above is unaffected.
+
+`APP_VERSION` is a build arg stamped into the image and reported at `GET /api/`,
+which makes a Kubernetes rolling update observable:
+
+```bash
+docker build --build-arg APP_VERSION=v2 -t <username>/node-react-mongo-redis-app:v2 .
 ```
 
 ---
@@ -195,8 +242,8 @@ services:
 
 | Method | Endpoint             | Description                                         |
 | ------ | -------------------- | --------------------------------------------------- |
-| GET    | `/api/health`        | Returns `{ "status": "ok" }`                        |
-| GET    | `/api/`              | Lists all available endpoints                       |
+| GET    | `/api/health`        | Returns `{ "status": "ok" }`. Touches **no** dependency — safe as a Kubernetes liveness probe |
+| GET    | `/api/`              | Lists all available endpoints, plus `version` and `hostname` |
 | GET    | `/api/network-info`  | Shows container hostname, configured hosts, and connectivity status for Mongo & Redis |
 | GET    | `/api/items`         | Fetches all items directly from MongoDB             |
 | POST   | `/api/items`         | Creates a new item (`{ "name": "..." }`)            |
@@ -219,6 +266,10 @@ node-react-mongo-redis/
 │   └── src/
 │       ├── main.jsx          # React entry point
 │       └── App.jsx           # Main UI component
+├── k8s/                      # ← Kubernetes course: 14 steps, Namespace → Helm
+│   ├── README.md             #   start here
+│   ├── 01-namespace/ … 13-probes/
+│   └── 14-helm/              #   chart + helmfile (dev/prod environments)
 ├── .dockerignore             # Files excluded from Docker build context
 ├── Dockerfile                # Multi-stage: builds frontend, packages into backend
 ├── docker-compose.yml        # Full stack: app + mongo + redis

@@ -1,0 +1,50 @@
+# Step 3b — The two selector dialects
+#
+# Kubernetes has TWO selector syntaxes, and knowing which objects accept which
+# is genuinely useful:
+#
+#   matchLabels      -> equality only, ANDed together. Services (v1 API) accept
+#                       ONLY this form (as a bare `selector:` map).
+#   matchExpressions -> In / NotIn / Exists / DoesNotExist. Accepted by
+#                       ReplicaSet, Deployment, Job, NetworkPolicy, PDB, etc.
+#
+# Both are ANDed when combined: a Pod must match EVERY clause.
+---
+# A Service can only do equality matching. This selects prod stable pods.
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-selector-equality
+  namespace: node-react-mongo-redis
+spec:
+  # No matchLabels wrapper here — Services take a plain map. Every entry ANDs.
+  selector:
+    app: node-react-mongo-redis
+    component: app
+    env: prod
+    release: stable
+  ports:
+    - port: 80
+      targetPort: http
+---
+# A NetworkPolicy (like ReplicaSet/Deployment) supports the richer set-based form.
+# This one selects: prod pods whose release is stable OR canary, that carry a
+# `version` label at all, and are not dev.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: demo-selector-set-based
+  namespace: node-react-mongo-redis
+spec:
+  podSelector:
+    matchLabels:
+      app: node-react-mongo-redis
+    matchExpressions:
+      - { key: release, operator: In, values: [stable, canary] }
+      - { key: version, operator: Exists }
+      - { key: env, operator: NotIn, values: [dev] }
+  # Allow-all rules — this object exists to demonstrate the SELECTOR, not to
+  # restrict traffic. An empty `{}` ingress rule permits everything.
+  policyTypes: [Ingress]
+  ingress:
+    - {}

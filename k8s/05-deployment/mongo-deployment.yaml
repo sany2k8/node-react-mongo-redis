@@ -1,0 +1,58 @@
+# Step 5 — MongoDB Deployment
+#
+# NOTE ON CORRECTNESS: a Deployment is the WRONG controller for a real database.
+# Its Pods are interchangeable and its storage here is ephemeral — data dies with
+# the Pod. Step 9 attaches a PersistentVolumeClaim, and the README there explains
+# why even that is not enough and what a StatefulSet would give you instead.
+#
+# We use a Deployment because it is what this step is teaching, and because a
+# single-replica ephemeral Mongo is fine for a lab.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongo
+  namespace: node-react-mongo-redis
+  labels:
+    app: node-react-mongo-redis
+    component: mongo
+spec:
+  replicas: 1
+  # Recreate, not RollingUpdate: two Mongo Pods must never hold the same volume
+  # at once. With RollingUpdate the new Pod starts before the old one dies, and
+  # both would try to lock the same data directory. This matters in step 9.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: node-react-mongo-redis
+      component: mongo
+  template:
+    metadata:
+      labels:
+        app: node-react-mongo-redis
+        component: mongo
+    spec:
+      containers:
+        - name: mongo
+          image: mongo:7.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: mongo
+              containerPort: 27017
+          # No auth yet — that arrives in step 8 with a Secret.
+          volumeMounts:
+            - name: data
+              mountPath: /data/db
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        # emptyDir = a directory on the node, wiped when the Pod is removed.
+        # Deliberately ephemeral. Step 9 swaps this for a PVC and you will
+        # destroy the Pod to prove the difference.
+        - name: data
+          emptyDir: {}

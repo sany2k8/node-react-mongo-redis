@@ -1,0 +1,99 @@
+# Step 10 — A seed Job
+#
+# A Job runs Pods until a specified number of them SUCCEED (exit 0), then stops.
+# That is the whole difference from a Deployment: a Deployment's Pods are meant
+# to run forever and `restartPolicy: Always` is enforced. A Job's Pods are meant
+# to finish.
+#
+# This seeds the labdb.items collection with starter data, authenticating with
+# the same Secret the app uses.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: seed-db
+  namespace: node-react-mongo-redis
+  labels:
+    app: node-react-mongo-redis
+    component: seed
+spec:
+  # Retries before the Job is marked Failed. Each retry is a NEW Pod, with
+  # exponential backoff (10s, 20s, 40s ... capped at 6m).
+  backoffLimit: 3
+
+  # Wall-clock limit for the WHOLE job, retries included. Exceed it and the Job
+  # is failed with reason DeadlineExceeded. Always set this — without it, a
+  # hung migration blocks a release forever.
+  activeDeadlineSeconds: 300
+
+  # Auto-delete the Job (and its Pods) 5 minutes after it finishes. Without
+  # this, finished Jobs pile up in the namespace forever. Requires k8s 1.23+.
+  ttlSecondsAfterFinished: 300
+
+  template:
+    metadata:
+      labels:
+        app: node-react-mongo-redis
+        component: seed
+    spec:
+      # NEVER (or OnFailure) — `Always` is invalid for a Job and the API server
+      # rejects it. With Never, a failed Pod is left behind and a new one is
+      # created (good for debugging: you keep the logs).
+      restartPolicy: Never
+      containers:
+        - name: seed
+          image: mongo:7.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MONGO_USER
+              valueFrom:
+                secretKeyRef: { name: app-secret, key: MONGO_USER }
+            - name: MONGO_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: app-secret, key: MONGO_PASSWORD }
+            - name: MONGO_HOST
+              valueFrom:
+                configMapKeyRef: { name: app-config, key: MONGO_HOST }
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              echo "==> waiting for mongo to accept connections"
+              # A Job has no dependency ordering — nothing guarantees mongo is
+              # up when this starts. Poll for it. (An initContainer is the other
+              # idiomatic way to do this.)
+              until mongosh "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@${MONGO_HOST}:27017/admin" \
+                      --quiet --eval 'db.runCommand({ping:1})' > /dev/null 2>&1; do
+                echo "    mongo not ready, retrying in 2s..."
+                sleep 2
+              done
+              echo "==> mongo is up. seeding labdb.items"
+
+              # IDEMPOTENT: this Job may run more than once (retries, re-apply,
+              # a Helm hook on every upgrade). Design every Job to be safe to
+              # repeat — here, a unique index + upsert makes re-runs harmless.
+              mongosh "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@${MONGO_HOST}:27017/labdb?authSource=admin" --quiet --eval '
+                db.items.createIndex({ name: 1 }, { unique: true });
+
+                const seeds = [
+                  "seeded: kubernetes",
+                  "seeded: docker",
+                  "seeded: mongodb",
+                  "seeded: redis"
+                ];
+
+                let inserted = 0;
+                for (const name of seeds) {
+                  const r = db.items.updateOne(
+                    { name: name },
+                    { $setOnInsert: { name: name, created_at: new Date().toISOString() } },
+                    { upsert: true }
+                  );
+                  if (r.upsertedCount > 0) inserted++;
+                }
+                print("==> inserted " + inserted + " new, total docs: " + db.items.countDocuments());
+              '
+              echo "==> seed complete"
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 300m, memory: 256Mi }

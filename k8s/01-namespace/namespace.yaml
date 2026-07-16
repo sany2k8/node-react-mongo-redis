@@ -1,0 +1,55 @@
+# Step 1 — Namespace
+#
+# A Namespace is a virtual cluster inside your cluster. It scopes NAMES, not
+# machines: two Pods called "app" can coexist as long as they live in different
+# namespaces. Everything in this lab is created inside this one, which means the
+# whole lab can be deleted later with a single `kubectl delete namespace`.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: node-react-mongo-redis
+  labels:
+    # These are just labels on the Namespace object itself. They let you select
+    # namespaces the same way you select Pods, e.g. `kubectl get ns -l lab=k8s-mastery`.
+    lab: k8s-mastery
+    app.kubernetes.io/part-of: node-react-mongo-redis
+---
+# A ResourceQuota caps what the whole namespace may consume. This is the real
+# reason namespaces exist in shared clusters: isolation with enforced limits.
+# It also protects you from an HPA (step 11) scaling to 100 pods by accident.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: lab-quota
+  namespace: node-react-mongo-redis
+spec:
+  hard:
+    requests.cpu: "2"
+    requests.memory: 2Gi
+    limits.cpu: "4"
+    limits.memory: 4Gi
+    pods: "20"
+    # 6, not 4: steps 9-13 use 2 (mongo-data, redis-data) and the step 14 Helm
+    # release adds 2 more, so both can coexist while you learn. Set it to 4 and
+    # `helm install` fails with:
+    #   persistentvolumeclaims "nrmr-prod-mongodb" is forbidden: exceeded quota
+    # ...which is the quota working exactly as intended.
+    persistentvolumeclaims: "6"
+---
+# A LimitRange supplies DEFAULT requests/limits to any container that does not
+# specify its own. Without this, a container with no requests is "BestEffort"
+# and is the first thing evicted when a node runs out of memory.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: lab-defaults
+  namespace: node-react-mongo-redis
+spec:
+  limits:
+    - type: Container
+      default: # becomes the container's limits if unset
+        cpu: 500m
+        memory: 512Mi
+      defaultRequest: # becomes the container's requests if unset
+        cpu: 50m
+        memory: 64Mi

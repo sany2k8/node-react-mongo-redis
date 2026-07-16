@@ -1,0 +1,33 @@
+# Step 9 — Mongo PersistentVolumeClaim
+#
+# A PVC is a REQUEST for storage: "I need 1Gi that I can mount read-write."
+# A PV is the actual piece of storage. You almost never write a PV by hand —
+# a StorageClass provisions one dynamically to satisfy the claim.
+#
+#   PVC (what you want)  ──bound to──►  PV (what you got)  ──►  real disk
+#
+# The Pod references the PVC by name and never knows what backs it. That
+# indirection is the point: the same manifest works on kind (local-path),
+# EKS (EBS), and GKE (PD) — only the StorageClass changes.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongo-data
+  namespace: node-react-mongo-redis
+  labels:
+    app: node-react-mongo-redis
+    component: mongo
+spec:
+  accessModes:
+    # ReadWriteOnce = mountable read-write by ONE NODE (not one Pod — a common
+    # misreading; several Pods on the SAME node can share an RWO volume).
+    # It is what block storage (EBS, PD, local-path) supports. For many-node
+    # sharing you need RWX, which requires a network filesystem (NFS, EFS...).
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  # Omitting storageClassName uses the cluster default. On this cluster that is
+  # `standard` (rancher.io/local-path). Named explicitly here so the manifest is
+  # self-documenting — check yours with `kubectl get storageclass`.
+  storageClassName: standard

@@ -1,0 +1,59 @@
+{{/*
+A HELM TEST. Not deployed with the release — it only runs on `helm test <rel>`.
+The test-success hook marks it as a test; Helm creates the pod, waits, and
+reports pass/fail on exit code.
+
+This is your smoke test. Wire it into CI after `helm upgrade --wait`.
+*/}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "nrmr.fullname" . }}-test-connection"
+  labels:
+    {{- include "nrmr.componentLabels" (dict "ctx" . "component" "test") | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    # Keep failed test pods so you can read the logs; delete them before a re-run.
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  restartPolicy: Never
+  containers:
+    - name: test
+      image: curlimages/curl:latest
+      command:
+        - sh
+        - -c
+        - |
+          set -e
+          BASE="http://{{ include "nrmr.fullname" . }}-app:{{ .Values.app.service.port }}"
+
+          echo "==> 1/4 health"
+          curl -sf "$BASE/api/health" | grep -q '"status":"ok"'
+          echo "    ok"
+
+          echo "==> 2/4 app reports its version"
+          curl -sf "$BASE/api/" | grep -q '"version"'
+          echo "    ok"
+
+          {{- if .Values.mongodb.enabled }}
+          echo "==> 3/4 mongo reachable + authenticated (writes a doc)"
+          curl -sf -X POST "$BASE/api/items" \
+            -H 'Content-Type: application/json' \
+            -d '{"name":"helm-test-'"$(date +%s)"'"}' | grep -q '"_id"'
+          echo "    ok"
+          {{- else }}
+          echo "==> 3/4 mongo disabled, skipping"
+          {{- end }}
+
+          {{- if .Values.redis.enabled }}
+          echo "==> 4/4 redis reachable + authenticated"
+          curl -sf "$BASE/api/counter" | grep -q '"hit_counter"'
+          echo "    ok"
+          {{- else }}
+          echo "==> 4/4 redis disabled, skipping"
+          {{- end }}
+
+          echo "ALL TESTS PASSED"
+      resources:
+        requests: { cpu: 10m, memory: 16Mi }
+        limits: { cpu: 100m, memory: 64Mi }

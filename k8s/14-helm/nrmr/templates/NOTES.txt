@@ -1,0 +1,67 @@
+{{/*
+NOTES.txt is printed after `helm install`/`helm upgrade`. It is a template like
+any other, so it can tell the user exactly what to do given THEIR values.
+Re-print it any time with: helm get notes <release> -n <namespace>
+*/}}
+✅ {{ .Chart.Name }}-{{ .Chart.Version }} deployed as release "{{ .Release.Name }}" (revision {{ .Release.Revision }})
+
+   App version : {{ include "nrmr.appImage" . }}
+   Namespace   : {{ .Release.Namespace }}
+   Replicas    : {{ if .Values.autoscaling.enabled }}{{ .Values.autoscaling.minReplicas }}-{{ .Values.autoscaling.maxReplicas }} (HPA){{ else }}{{ .Values.app.replicaCount }} (fixed){{ end }}
+   MongoDB     : {{ if .Values.mongodb.enabled }}{{ include "nrmr.mongoServiceName" . }}:27017{{ if .Values.mongodb.persistence.enabled }} (PVC {{ .Values.mongodb.persistence.size }}){{ else }} (ephemeral ⚠️){{ end }}{{ else }}disabled — external{{ end }}
+   Redis       : {{ if .Values.redis.enabled }}{{ include "nrmr.redisServiceName" . }}:6379{{ if .Values.redis.persistence.enabled }} (PVC {{ .Values.redis.persistence.size }}){{ else }} (ephemeral ⚠️){{ end }}{{ else }}disabled — external{{ end }}
+
+1. Wait for it to come up:
+
+   kubectl rollout status deploy/{{ include "nrmr.fullname" . }}-app -n {{ .Release.Namespace }}
+
+2. Reach the app:
+{{- if eq .Values.app.service.type "NodePort" }}
+
+   ⚠️  This is a kind-backed cluster: NodePort is NOT reachable from macOS
+       (see step 6). Either port-forward, or run the socat bridge:
+
+   kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "nrmr.fullname" . }}-app 8080:{{ .Values.app.service.port }}
+   # -> http://localhost:8080
+
+   # or, for a stable NodePort URL:
+   NODE_IP=$(kubectl get nodes -o jsonpath='{.items[1].status.addresses[0].address}')
+   docker run -d --name k8s-np-proxy --network kind -p {{ .Values.app.service.nodePort }}:{{ .Values.app.service.nodePort }} \
+     alpine/socat tcp-listen:{{ .Values.app.service.nodePort }},fork,reuseaddr tcp-connect:$NODE_IP:{{ .Values.app.service.nodePort }}
+   # -> http://localhost:{{ .Values.app.service.nodePort }}
+{{- else if eq .Values.app.service.type "LoadBalancer" }}
+
+   kubectl get svc -n {{ .Release.Namespace }} {{ include "nrmr.fullname" . }}-app -w
+   # wait for EXTERNAL-IP, then http://<EXTERNAL-IP>:{{ .Values.app.service.port }}
+{{- else }}
+
+   kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "nrmr.fullname" . }}-app 8080:{{ .Values.app.service.port }}
+   # -> http://localhost:8080
+{{- end }}
+
+3. Try it:
+
+   curl localhost:8080/api/health
+   curl localhost:8080/api/         # reports which app version served you
+   curl localhost:8080/api/items    # seeded by the pre-install hook
+   curl localhost:8080/api/counter  # redis
+
+4. Verify the release:
+
+   helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+   helm status {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+{{- if not .Values.auth.existingSecret }}
+
+⚠️  SECURITY: credentials came from values.yaml in PLAINTEXT. Fine for a lab.
+    For real, set `auth.existingSecret` to a Secret you manage out-of-band
+    (SOPS / External Secrets / Vault), and the chart will stop templating one.
+{{- end }}
+{{- if and .Values.autoscaling.enabled (not .Values.mongodb.enabled) }}
+{{- end }}
+{{- if .Values.autoscaling.enabled }}
+
+ℹ️  HPA is enabled — it needs metrics-server:
+    kubectl top pods -n {{ .Release.Namespace }}
+    kubectl get hpa -n {{ .Release.Namespace }} -w
+{{- end }}

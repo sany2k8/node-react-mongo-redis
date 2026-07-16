@@ -1,0 +1,152 @@
+# Default values for the nrmr chart.
+# Override with -f myvalues.yaml or --set key=value.
+#
+# `helm show values ./nrmr` prints this file — so it doubles as your chart's
+# public API documentation. Comment it like an API.
+
+# -- Override the generated name (defaults to the chart name)
+nameOverride: ""
+# -- Override the full generated name (defaults to "<release>-<chart>")
+fullnameOverride: ""
+
+# =============================================================================
+# App (Express + React)
+# =============================================================================
+app:
+  replicaCount: 3
+
+  image:
+    repository: sany2k8/node-react-mongo-redis-app
+    # -- Image tag. Empty = use Chart.appVersion. This is the idiomatic default:
+    #    it keeps the shipped app version in one place (Chart.yaml).
+    tag: ""
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP # ClusterIP | NodePort | LoadBalancer
+    port: 80
+    # -- Only used when type is NodePort. Cluster-wide unique (see step 6) —
+    #    a duplicate is rejected with "provided port is already allocated".
+    nodePort: 30301
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 96Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
+
+  # -- Probes (step 13). Liveness hits /api/health, which touches NO dependency.
+  probes:
+    startup:
+      enabled: true
+      failureThreshold: 30
+      periodSeconds: 2
+    liveness:
+      enabled: true
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 3
+    readiness:
+      enabled: true
+      periodSeconds: 3
+      timeoutSeconds: 2
+      failureThreshold: 2
+
+  # -- Rolling update strategy (step 12)
+  strategy:
+    maxUnavailable: 0
+    maxSurge: 1
+  minReadySeconds: 5
+  progressDeadlineSeconds: 180
+  revisionHistoryLimit: 5
+  terminationGracePeriodSeconds: 30
+  # -- preStop sleep so endpoint removal propagates before SIGTERM (step 13)
+  preStopSleepSeconds: 5
+
+  # -- Non-sensitive config -> ConfigMap (step 8)
+  config:
+    NODE_ENV: production
+    PORT: "3000"
+
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# =============================================================================
+# Autoscaling (step 11) — requires metrics-server
+# =============================================================================
+autoscaling:
+  enabled: false # off by default; dev doesn't need it
+  minReplicas: 2
+  maxReplicas: 8
+  targetCPUUtilizationPercentage: 50
+  targetMemory: "" # e.g. 150Mi. Empty = no memory metric.
+  behavior:
+    scaleDownStabilizationSeconds: 300 # 5 min — the production default
+    scaleUpStabilizationSeconds: 30
+
+# =============================================================================
+# MongoDB
+# =============================================================================
+mongodb:
+  enabled: true
+  image:
+    repository: mongo
+    tag: "7.0"
+    pullPolicy: IfNotPresent
+  persistence:
+    enabled: true
+    size: 1Gi
+    # -- Empty = cluster default StorageClass
+    storageClass: ""
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+
+# =============================================================================
+# Redis
+# =============================================================================
+redis:
+  enabled: true
+  image:
+    repository: redis
+    tag: "7-alpine"
+    pullPolicy: IfNotPresent
+  persistence:
+    enabled: true
+    size: 512Mi
+    storageClass: ""
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 200m, memory: 256Mi }
+
+# =============================================================================
+# Credentials -> Secret (step 8)
+# =============================================================================
+# ##########################################################################
+# #  PLAINTEXT IN A VALUES FILE IS NOT A SECRET MANAGEMENT STRATEGY.       #
+# #                                                                        #
+# #  This works for a lab. For real:                                       #
+# #    - helm secrets (SOPS)   : encrypt the values file itself            #
+# #    - External Secrets Op.  : sync from Vault/AWS SM into a k8s Secret  #
+# #    - existingSecret        : create the Secret out-of-band, name it    #
+# #                              here, and let the chart just reference it #
+# ##########################################################################
+auth:
+  # -- Reference a Secret you created yourself. When set, the chart does NOT
+  #    template a Secret and the values below are ignored. This is the safe path.
+  existingSecret: ""
+  mongoUser: appuser
+  mongoPassword: "s3cr3t-p@ss"
+  redisPassword: "r3d1s-s3cr3t"
+
+# =============================================================================
+# Seed Job (step 10) — runs as a Helm hook before install/upgrade
+# =============================================================================
+seedJob:
+  enabled: true
+  backoffLimit: 3
+  activeDeadlineSeconds: 300

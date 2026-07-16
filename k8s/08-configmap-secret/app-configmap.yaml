@@ -1,0 +1,33 @@
+# Step 8 — ConfigMap
+#
+# Everything the app needs to know that is NOT sensitive. Same image, different
+# ConfigMap = dev / staging / prod. That is the whole point: config lives
+# outside the image so you promote the SAME artifact through environments.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: node-react-mongo-redis
+  labels:
+    app: node-react-mongo-redis
+    component: app
+data:
+  # --- consumed as environment variables (envFrom) ---
+  # Keys must be valid env var names to be usable with envFrom.
+  NODE_ENV: "production"
+  PORT: "3000"
+  MONGO_HOST: "mongo" # the Service name from step 6
+  MONGO_PORT: "27017"
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+
+  # --- consumed as a FILE (volume mount) ---
+  # A ConfigMap value can be a whole file. Mounted, this becomes
+  # /etc/app-config/app-info.json inside the container.
+  app-info.json: |
+    {
+      "environment": "kubernetes-lab",
+      "cluster": "docker-desktop",
+      "managed_by": "kubectl",
+      "note": "This file came from a ConfigMap volume mount, not the image."
+    }

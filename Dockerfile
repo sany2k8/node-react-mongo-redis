@@ -20,8 +20,13 @@ COPY backend/src ./src
 # Bring in the built frontend assets so Express can serve them statically.
 COPY --from=frontend-build /frontend/dist ./public
 
+# Stamped into the image so a Kubernetes rolling update is observable at
+# GET /api/  ->  docker build --build-arg APP_VERSION=v2 -t ...:v2 .
+ARG APP_VERSION=dev
+
 ENV NODE_ENV=production \
     PORT=3000 \
+    APP_VERSION=${APP_VERSION} \
     MONGO_HOST=mongo \
     MONGO_PORT=27017 \
     REDIS_HOST=redis \

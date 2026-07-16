@@ -12,12 +12,24 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // only these env vars change (see the docker-compose.*.yml files).
 const MONGO_HOST = process.env.MONGO_HOST || "mongo";
 const MONGO_PORT = process.env.MONGO_PORT || "27017";
-const MONGO_URL = `mongodb://${MONGO_HOST}:${MONGO_PORT}`;
+// Credentials are optional. When unset the URL is byte-for-byte what it always
+// was, so the plain docker-compose stack (no auth) keeps working untouched.
+// Kubernetes injects these from a Secret once mongo runs with --auth.
+const MONGO_USER = process.env.MONGO_USER || "";
+const MONGO_PASSWORD = process.env.MONGO_PASSWORD || "";
+const MONGO_URL = MONGO_USER
+  ? `mongodb://${encodeURIComponent(MONGO_USER)}:${encodeURIComponent(MONGO_PASSWORD)}@${MONGO_HOST}:${MONGO_PORT}/?authSource=admin`
+  : `mongodb://${MONGO_HOST}:${MONGO_PORT}`;
 
 const REDIS_HOST = process.env.REDIS_HOST || "redis";
 const REDIS_PORT = process.env.REDIS_PORT || "6379";
+const REDIS_PASSWORD = process.env.REDIS_PASSWORD || "";
 
 const PORT = process.env.PORT || 3000;
+
+// Baked in at build time (ARG APP_VERSION), so a rolling update is observable:
+// watch /api/ flip from v1 to v2 pod by pod.
+const APP_VERSION = process.env.APP_VERSION || "dev";
 
 // --- Mongo (lazy connect, tolerate failure so the app stays useful) --------
 let mongoClient;
@@ -34,6 +46,8 @@ async function getMongoCollection() {
 
 // --- Redis (lazy connect, tolerate failure) --------------------------------
 const redisClient = createClient({
+  // Omitted entirely when empty, so an unauthenticated redis behaves as before.
+  ...(REDIS_PASSWORD ? { password: REDIS_PASSWORD } : {}),
   socket: {
     host: REDIS_HOST,
     port: Number(REDIS_PORT),
@@ -68,6 +82,7 @@ app.get("/api/health", (_req, res) => {
 app.get("/api/", (_req, res) => {
   res.json({
     app: "node-mongo-redis",
+    version: APP_VERSION,
     hostname: os.hostname(),
     endpoints: [
       "GET  /api/health",
@@ -83,10 +98,13 @@ app.get("/api/", (_req, res) => {
 app.get("/api/network-info", async (_req, res) => {
   const info = {
     container_hostname: os.hostname(),
+    version: APP_VERSION,
     mongo_host_configured: MONGO_HOST,
     mongo_port_configured: MONGO_PORT,
+    mongo_auth: Boolean(MONGO_USER),
     redis_host_configured: REDIS_HOST,
     redis_port_configured: REDIS_PORT,
+    redis_auth: Boolean(REDIS_PASSWORD),
   };
 
   try {

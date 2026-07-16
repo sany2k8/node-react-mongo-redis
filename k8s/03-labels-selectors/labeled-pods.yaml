@@ -1,0 +1,68 @@
+# Step 3 — Labels & Selectors
+#
+# Three Pods that differ ONLY in their labels. Nothing here references anything
+# else by name — the entire cluster is wired together by label matching, and
+# these Pods exist to let you feel that.
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: demo-app-prod
+  namespace: node-react-mongo-redis
+  labels:
+    app: node-react-mongo-redis
+    component: app
+    env: prod
+    release: stable
+    version: v1
+spec:
+  containers:
+    - name: app
+      image: sany2k8/node-react-mongo-redis-app:v1
+      imagePullPolicy: IfNotPresent
+      ports: [{ name: http, containerPort: 3000 }]
+      resources:
+        requests: { cpu: 50m, memory: 96Mi }
+        limits: { cpu: 200m, memory: 256Mi }
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: demo-app-canary
+  namespace: node-react-mongo-redis
+  labels:
+    app: node-react-mongo-redis
+    component: app
+    env: prod
+    release: canary # <- same app+component+env, different release
+    version: v2
+spec:
+  containers:
+    - name: app
+      image: sany2k8/node-react-mongo-redis-app:v2
+      imagePullPolicy: IfNotPresent
+      ports: [{ name: http, containerPort: 3000 }]
+      resources:
+        requests: { cpu: 50m, memory: 96Mi }
+        limits: { cpu: 200m, memory: 256Mi }
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: demo-app-dev
+  namespace: node-react-mongo-redis
+  labels:
+    app: node-react-mongo-redis
+    component: app
+    env: dev
+    release: stable
+    version: v1
+spec:
+  containers:
+    - name: app
+      image: sany2k8/node-react-mongo-redis-app:v1
+      imagePullPolicy: IfNotPresent
+      ports: [{ name: http, containerPort: 3000 }]
+      resources:
+        requests: { cpu: 50m, memory: 96Mi }
+        limits: { cpu: 200m, memory: 256Mi }

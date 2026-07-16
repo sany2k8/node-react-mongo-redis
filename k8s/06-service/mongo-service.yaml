@@ -1,0 +1,31 @@
+# Step 6 — Mongo Service (ClusterIP)
+#
+# THIS is the object that makes `MONGO_HOST=mongo` work. The name of the Service
+# becomes a DNS name inside the cluster:
+#
+#   mongo
+#   mongo.node-react-mongo-redis
+#   mongo.node-react-mongo-redis.svc
+#   mongo.node-react-mongo-redis.svc.cluster.local   <- the real FQDN
+#
+# A Pod's /etc/resolv.conf has a `search` list, so the short name resolves from
+# inside the same namespace. Cross-namespace needs at least `mongo.<namespace>`.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo # <-- this string is the DNS name
+  namespace: node-react-mongo-redis
+  labels:
+    app: node-react-mongo-redis
+    component: mongo
+spec:
+  type: ClusterIP # default: a virtual IP reachable only inside the cluster
+  selector:
+    # Equality only — Services can't do matchExpressions (see step 3).
+    app: node-react-mongo-redis
+    component: mongo
+  ports:
+    - name: mongo
+      port: 27017 # port ON THE SERVICE
+      targetPort: mongo # port ON THE POD — by NAME, from the container's ports:
+      protocol: TCP

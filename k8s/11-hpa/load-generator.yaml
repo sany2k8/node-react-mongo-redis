@@ -1,0 +1,52 @@
+# Step 11 — Load generator
+#
+# Hammers the app Service in a tight loop to drive CPU up and trigger the HPA.
+# Scale THIS deployment to control the load:
+#
+#   kubectl scale deploy/load-generator --replicas=4 -n node-react-mongo-redis
+#   kubectl scale deploy/load-generator --replicas=0 -n node-react-mongo-redis   # stop
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: load-generator
+  namespace: node-react-mongo-redis
+  labels:
+    app: node-react-mongo-redis
+    component: loadgen
+spec:
+  replicas: 0 # start stopped — scale it up when you're ready to watch
+  selector:
+    matchLabels:
+      app: node-react-mongo-redis
+      component: loadgen
+  template:
+    metadata:
+      labels:
+        app: node-react-mongo-redis
+        component: loadgen
+    spec:
+      # Don't wait 30s for these to die when you scale to 0.
+      terminationGracePeriodSeconds: 1
+      containers:
+        - name: loadgen
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            # `app` is the ClusterIP Service from step 6. Each request makes the
+            # Node process do real work (JSON + os.hostname), which is enough to
+            # push a 100m-request pod past 50% utilization.
+            - |
+              echo "load generator starting against http://app/api/"
+              while true; do
+                wget -q -O /dev/null http://app/api/ 2>/dev/null
+              done
+          resources:
+            # Keep the generator small so IT doesn't eat the quota the app needs
+            # to scale into.
+            requests:
+              cpu: 20m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 32Mi

@@ -1,0 +1,7 @@
+# Patterns to exclude when packaging the chart (helm package).
+.DS_Store
+.git/
+.gitignore
+*.tmp
+*.bak
+*.swp

@@ -1,0 +1,56 @@
+# Step 9b — A MANUALLY provisioned PV + PVC (static provisioning)
+#
+# You will rarely do this in a real cluster — dynamic provisioning via a
+# StorageClass is the norm. It's here so you can see the object a StorageClass
+# would have created for you, and watch binding happen.
+#
+# Apply this SEPARATELY from the main step (it's a side demo):
+#   kubectl apply -f 09-persistent-volume/manual-pv.yaml
+---
+apiVersion: v1
+kind: PersistentVolume # NOTE: cluster-scoped — no namespace field!
+metadata:
+  name: manual-demo-pv
+  labels:
+    type: local
+spec:
+  capacity:
+    storage: 100Mi
+  accessModes:
+    - ReadWriteOnce
+
+  # What happens to this PV when its PVC is deleted:
+  #   Retain  = keep the data, PV goes to "Released" and must be cleaned by hand.
+  #             The only safe choice for a real database.
+  #   Delete  = destroy the PV and the underlying disk. The default for most
+  #             dynamic StorageClasses — including `standard` on this cluster.
+  #   Recycle = deprecated, ignore it.
+  persistentVolumeReclaimPolicy: Retain
+
+  # "" (empty string) means "no StorageClass" — it stops the default class from
+  # dynamically provisioning something and lets this static PV be matched.
+  storageClassName: ""
+
+  # hostPath writes to the NODE's filesystem. It is for single-node demos ONLY:
+  # the data is stranded on whichever node wrote it, and if the Pod reschedules
+  # elsewhere it silently sees an empty directory. Never use it in production.
+  hostPath:
+    path: /tmp/k8s-manual-pv
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: manual-demo-pvc
+  namespace: node-react-mongo-redis
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Mi # asks for 50Mi; binds to the 100Mi PV — you get the WHOLE PV.
+  storageClassName: "" # must match the PV's — otherwise the default class hijacks it
+  # You can also force a specific PV by label:
+  # selector:
+  #   matchLabels:
+  #     type: local

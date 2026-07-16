@@ -1,0 +1,88 @@
+# Step 5 — The app Deployment
+#
+# A Deployment does not manage Pods. It manages ReplicaSets, and the ReplicaSets
+# manage Pods:
+#
+#   Deployment  ──owns──►  ReplicaSet(s)  ──own──►  Pods
+#
+# On every change to `template`, the Deployment creates a NEW ReplicaSet and
+# shifts replicas from the old one to the new one according to `strategy`.
+# The old ReplicaSet is kept (scaled to 0) — that is what `rollout undo` rewinds
+# to in step 12.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+  namespace: node-react-mongo-redis
+  labels:
+    app: node-react-mongo-redis
+    component: app
+spec:
+  replicas: 3
+
+  # How many old ReplicaSets to retain for rollback. Default is 10.
+  revisionHistoryLimit: 5
+
+  # A Pod must stay Ready this long before it counts as available. 0 (the
+  # default) means "Ready is enough" — which, with no readiness probe yet
+  # (step 13), means "the process started". Deliberately naive for now.
+  minReadySeconds: 0
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # With replicas:3 -> at most 4 pods exist, at least 2 serve traffic.
+      # maxUnavailable:0 + maxSurge:1 = never dip below full capacity
+      # (needs room in the ResourceQuota for the extra pod).
+      maxUnavailable: 1
+      maxSurge: 1
+
+  selector:
+    matchLabels: # IMMUTABLE — keep it minimal and stable
+      app: node-react-mongo-redis
+      component: app
+
+  template:
+    metadata:
+      labels:
+        app: node-react-mongo-redis
+        component: app
+        version: v1 # NOT in the selector, so it's free to change
+    spec:
+      containers:
+        - name: app
+          image: sany2k8/node-react-mongo-redis-app:v1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            # Hardcoded for now. Step 8 moves all of this into a ConfigMap.
+            - name: MONGO_HOST
+              value: "mongo"
+            - name: MONGO_PORT
+              value: "27017"
+            - name: REDIS_HOST
+              value: "redis"
+            - name: REDIS_PORT
+              value: "6379"
+            # Handy: let each Pod report its own identity. The downward API
+            # exposes object metadata to the container without any API calls.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          resources:
+            requests:
+              cpu: 100m
+              memory: 96Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+          # No probes yet — step 13. Right now Kubernetes considers this Pod
+          # "Ready" the instant the process starts, which is a lie it will
+          # happily route traffic into.
