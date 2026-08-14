@@ -15,6 +15,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      # The immutable tag the chart will pin to.
+      sha_tag: ${{ steps.meta.outputs.version }}
 
     steps:
       - name: Checkout
@@ -32,6 +35,13 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # `main` stays as a convenience pointer, but the short SHA is what the
+          # chart pins: a mutable tag gives ArgoCD nothing to notice, so the
+          # cluster would never roll. Order matters — the first tag becomes
+          # steps.meta.outputs.version, which the bump-chart job consumes.
+          tags: |
+            type=sha,format=short,prefix=
+            type=raw,value=main,enable={{is_default_branch}}
 
       - name: Build and push
         uses: docker/build-push-action@v5
@@ -40,3 +50,30 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Surfaces at GET /api/ so you can see which build is live.
+          build-args: |
+            APP_VERSION=${{ steps.meta.outputs.version }}
+
+  bump-chart:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the chart repo
+        uses: actions/checkout@v4
+        with:
+          repository: sany2k8/nrmr-chart
+          token: ${{ secrets.CHART_REPO_TOKEN }}
+
+      - name: Point dev at the new image
+        env:
+          TAG: ${{ needs.build-and-push.outputs.sha_tag }}
+        run: |
+          yq -i '.app.image.tag = strenv(TAG)' values-dev.yaml
+          git config user.name  "sany2k8"
+          git config user.email "sany2k8@gmail.com"
+          if git diff --quiet; then
+            echo "values-dev.yaml already on $TAG — nothing to do"
+            exit 0
+          fi
+          git commit -am "chore(dev): deploy $TAG"
+          git push
