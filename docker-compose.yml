@@ -11,7 +11,7 @@ services:
     build: .
     container_name: node-app
     ports:
-      - "3000:3000"
+      - "3040:3000"   # 3040 on the host; 3000 belongs to ticketing-system
     environment:
       NODE_ENV: production
       PORT: 3000
@@ -51,7 +51,7 @@ services:
     volumes:
       - redis_data:/data
     ports:
-      - "6379:6379"
+      - "6383:6379"   # 6383 on the host to leave 6379 for a local Redis
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s

@@ -90,8 +90,8 @@ docker compose up --build -d
 docker compose ps
 
 # 4. Open the app
-open http://localhost:3000    # macOS
-# or visit http://localhost:3000 in your browser
+open http://localhost:3040    # macOS
+# or visit http://localhost:3040 in your browser
 ```
 
 ### Stopping the stack
@@ -292,22 +292,22 @@ The `docker-compose.yml` uses a custom bridge network (`app-network`). All three
 
 ```bash
 docker compose up --build -d
-curl http://localhost:3000/api/network-info
+curl http://localhost:3040/api/network-info
 ```
 
 ### Testing connectivity
 
 ```bash
 # Add an item to MongoDB
-curl -X POST http://localhost:3000/api/items \
+curl -X POST http://localhost:3040/api/items \
   -H "Content-Type: application/json" \
   -d '{"name": "hello world"}'
 
 # Read items (from cache or Mongo)
-curl http://localhost:3000/api/items/cached
+curl http://localhost:3040/api/items/cached
 
 # Bump the Redis counter
-curl http://localhost:3000/api/counter
+curl http://localhost:3040/api/counter
 ```
 
 ---
